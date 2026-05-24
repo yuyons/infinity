@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="오션 VR 트래커">
+  <meta name="theme-color" content="#fafafa">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+  <title>오션의 무한매수 VR 트래커</title>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <span class="brand-mark">▲</span>
+        <span class="brand-text">INFINITY</span>
+      </div>
+      <div class="ticker-switch" id="tickerSwitch">
+        <!-- 동적 생성됨 -->
+      </div>
+    </div>
+  </header>
+
+  <nav class="tabbar" id="tabbar">
+    <button class="tab active" data-tab="dashboard">대시보드</button>
+    <button class="tab" data-tab="m40">40무매</button>
+    <button class="tab" data-tab="m20">20무매</button>
+    <button class="tab" data-tab="vr">VR</button>
+    <button class="tab" data-tab="settings">설정</button>
+  </nav>
+
+  <main id="main">
+    <!-- 대시보드 -->
+    <section class="page active" id="page-dashboard">
+      <div class="hero">
+        <div class="hero-label">CURRENT TICKER</div>
+        <div class="hero-ticker" id="heroTicker">TQQQ</div>
+        <div class="price-input-wrap">
+          <label class="mini-label">오늘 종가 (USD)</label>
+          <div class="price-input-row">
+            <input type="number" step="0.01" class="price-input" id="todayPrice" placeholder="0.00">
+            <button class="fetch-btn" id="fetchPriceBtn" title="Finnhub에서 자동 조회">↻</button>
+          </div>
+          <div class="price-meta" id="priceMeta"></div>
+        </div>
+      </div>
+
+      <div class="card-grid">
+        <div class="stat-card">
+          <div class="stat-label">40무매 회차</div>
+          <div class="stat-value" id="d40Round">—</div>
+          <div class="stat-sub" id="d40Sub">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">20무매 회차</div>
+          <div class="stat-value" id="d20Round">—</div>
+          <div class="stat-sub" id="d20Sub">—</div>
+        </div>
+        <div class="stat-card wide">
+          <div class="stat-label">VR 신호</div>
+          <div class="stat-value" id="dVrSignal">—</div>
+          <div class="stat-sub" id="dVrSub">—</div>
+        </div>
+      </div>
+
+      <div class="signal-box" id="signalBox">
+        <div class="signal-title">오늘의 액션</div>
+        <div class="signal-list" id="signalList">
+          <div class="signal-empty">종가를 입력하면 신호가 표시됩니다</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 40무매 -->
+    <section class="page" id="page-m40">
+      <div class="page-head">
+        <h2>40무매 V2.2</h2>
+        <p class="page-desc">시드 40분할 · ★%=12−T×0.6</p>
+      </div>
+
+      <div class="config-card">
+        <div class="config-row">
+          <label>총 시드 (USD)</label>
+          <input type="number" id="m40Seed" placeholder="40000">
+        </div>
+        <div class="config-row">
+          <label>1회매수액 (USD)</label>
+          <input type="number" step="0.01" id="m40PerRound" placeholder="시드÷40">
+        </div>
+        <p class="info-text" style="margin-top:8px;font-size:11px;">평단·수량·T값은 거래이력으로 자동 계산됩니다. 1회매수액은 반복리로 갱신 (사이클 익절 시 수익/40 자동 추가).</p>
+        <button class="primary-btn" id="m40Save">저장</button>
+      </div>
+
+      <div class="result-card" id="m40Result">
+        <h3>오늘의 계산</h3>
+        <div class="result-empty">시드/평단/종가를 입력하면 매수가·수량이 표시됩니다</div>
+      </div>
+
+      <div class="history-card">
+        <div class="history-head">
+          <h3>거래 이력</h3>
+          <button class="ghost-btn" id="m40AddTrade">+ 추가</button>
+        </div>
+        <div class="history-list" id="m40History"></div>
+      </div>
+    </section>
+
+    <!-- 20무매 -->
+    <section class="page" id="page-m20">
+      <div class="page-head">
+        <h2>20무매 V3.0</h2>
+        <p class="page-desc">시드 20분할 · 종목별 ★% 산식</p>
+      </div>
+
+      <div class="config-card">
+        <div class="config-row">
+          <label>총 시드 (USD)</label>
+          <input type="number" id="m20Seed" placeholder="20000">
+        </div>
+        <div class="config-row">
+          <label>1회매수액 (USD)</label>
+          <input type="number" step="0.01" id="m20PerRound" placeholder="시드÷20">
+        </div>
+        <p class="info-text" style="margin-top:8px;font-size:11px;">평단·수량·T값은 거래이력으로 자동 계산됩니다. ★% 산식은 설정 → 종목 관리에서 종목별로 등록.</p>
+        <button class="primary-btn" id="m20Save">저장</button>
+      </div>
+
+      <div class="result-card" id="m20Result">
+        <h3>오늘의 계산</h3>
+        <div class="result-empty">시드/평단/종가를 입력하면 매수가·수량이 표시됩니다</div>
+      </div>
+
+      <div class="history-card">
+        <div class="history-head">
+          <h3>거래 이력</h3>
+          <button class="ghost-btn" id="m20AddTrade">+ 추가</button>
+        </div>
+        <div class="history-list" id="m20History"></div>
+      </div>
+    </section>
+
+    <!-- VR -->
+    <section class="page" id="page-vr">
+      <div class="page-head">
+        <h2>VR (Value Rebalancing)</h2>
+        <p class="page-desc">평가금 기준 V선 리밸런싱</p>
+      </div>
+
+      <div class="config-card">
+        <div class="config-row">
+          <label>초기 투자금 V₀ (USD)</label>
+          <input type="number" id="vrV0" placeholder="10000">
+        </div>
+        <div class="config-row">
+          <label>사이클 시작일</label>
+          <input type="date" id="vrStartDate">
+        </div>
+        <div class="config-row">
+          <label>월 적립금 (USD, 없으면 0)</label>
+          <input type="number" id="vrMonthly" placeholder="0">
+        </div>
+        <div class="config-row">
+          <label>G 값 (적립10/거치10/인출20)</label>
+          <input type="number" id="vrG" placeholder="10" min="1">
+        </div>
+        <div class="config-row">
+          <label>현재 보유 수량 (주)</label>
+          <input type="number" id="vrQty" placeholder="0">
+        </div>
+        <div class="config-row">
+          <label>현재 예수금 P (USD)</label>
+          <input type="number" id="vrPool" placeholder="0">
+        </div>
+        <div class="config-row">
+          <label>밴드 상단 (%)</label>
+          <input type="number" id="vrUpper" placeholder="120">
+        </div>
+        <div class="config-row">
+          <label>밴드 하단 (%)</label>
+          <input type="number" id="vrLower" placeholder="80">
+        </div>
+        <button class="primary-btn" id="vrSave">저장</button>
+      </div>
+
+      <div class="result-card" id="vrResult">
+        <h3>VR 현황</h3>
+        <div class="result-empty">파라미터와 종가를 입력하면 V·평가금·신호가 계산됩니다</div>
+      </div>
+
+      <div class="history-card">
+        <div class="history-head">
+          <h3>리밸런싱 이력</h3>
+          <button class="ghost-btn" id="vrAddTrade">+ 추가</button>
+        </div>
+        <div class="history-list" id="vrHistory"></div>
+      </div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="page" id="page-settings">
+      <div class="page-head">
+        <h2>설정</h2>
+        <p class="page-desc">데이터 관리 및 정보</p>
+      </div>
+
+      <div class="settings-card">
+        <h3>종목 관리</h3>
+        <p class="info-text">종목·컬러를 등록하고, 20무매 V3.0의 종목별 ★% 산식을 설정합니다.<br>★% = const + coef × T (예: TQQQ는 15 + (−1.5)×T, SOXL은 20 + (−2)×T)</p>
+        <div id="tickerList" class="ticker-list"></div>
+        <div class="ticker-add-row">
+          <input type="text" id="newTickerSymbol" placeholder="심볼 (예: SOXL)" maxlength="6">
+          <input type="color" id="newTickerColor" value="#2563eb">
+          <button class="ghost-btn" id="addTickerBtn">추가</button>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3>전략 안내</h3>
+        <p class="info-text"><b>40무매 V2.2</b><br>★% = 12 − T×0.6 (a=40 고정)<br>매수: 전반전 (T&lt;20) 0%LOC+★%LOC 절반씩, 후반전 (T≥20) ★%LOC 전체<br>매도: 누적 1/4 = ★%LOC, 3/4 = +12% 지정가<br>매수가에 −$0.01 (동시체결 방지)</p>
+        <p class="info-text"><b>20무매 V3.0</b><br>★% = 종목별 산식 (위 종목 관리에서 설정)<br>매수: 전반전 (T&lt;10) 0%LOC+★%LOC 절반씩, 후반전 (T≥10) ★%LOC 전체<br>매도: 누적 1/4 = ★%LOC, 3/4 = +12% 지정가</p>
+      </div>
+
+      <div class="settings-card">
+        <h3>Finnhub API 키</h3>
+        <p class="info-text">자동 시세 조회를 위해 필요합니다. <a href="https://finnhub.io" target="_blank">finnhub.io</a>에서 무료 발급 가능. 키는 본인 폰에만 저장됩니다.</p>
+        <div class="config-row">
+          <label>API Key</label>
+          <input type="text" id="finnhubKey" placeholder="키 붙여넣기">
+        </div>
+        <button class="primary-btn" id="finnhubKeySave">키 저장</button>
+        <button class="ghost-btn" id="finnhubKeyTest">연결 테스트</button>
+      </div>
+
+      <div class="settings-card">
+        <button class="primary-btn" id="exportData">데이터 내보내기 (JSON)</button>
+        <button class="ghost-btn" id="importData">데이터 가져오기</button>
+        <input type="file" id="importFile" accept="application/json" style="display:none">
+        <button class="danger-btn" id="resetData">전체 초기화</button>
+      </div>
+
+      <div class="info-card">
+        <h3>전략 요약</h3>
+        <p><b>40무매 V2.2</b>: 시드 40분할. 평단 대비 종가 위치에 따라 매수수량 결정. 회차 진행하며 익절·쿼터손절.</p>
+        <p><b>20무매</b>: 40무매의 단축형. 시드 20분할로 회전율 ↑.</p>
+        <p><b>VR</b>: V = V₀ + (월적립합) + (V₀ × 일경과/30 × 1%/G). 평가금이 V × 상단% 초과 시 매도, V × 하단% 미만 시 매수.</p>
+      </div>
+
+      <div class="info-card">
+        <h3>주의</h3>
+        <p>본 도구는 개인 기록·계산 보조용입니다. 투자 자문이 아니며, 3배 레버리지 ETF는 변동성이 매우 큽니다. 모든 판단과 책임은 사용자 본인에게 있습니다.</p>
+      </div>
+
+      <div class="footer-note">v0.1 · IndexedDB local-only · 오션</div>
+    </section>
+  </main>
+
+  <!-- 거래 입력 모달 -->
+  <div class="modal" id="tradeModal">
+    <div class="modal-inner">
+      <div class="modal-head">
+        <h3 id="tradeModalTitle">거래 추가</h3>
+        <button class="close-btn" id="tradeModalClose">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="kakao-paste-section">
+          <label class="kakao-paste-label">증권사 알림 붙여넣기 (선택)</label>
+          <textarea id="kakaoPaste" class="kakao-paste-area" rows="4" placeholder="메리츠증권 등 카톡 알림 메시지를 그대로 붙여넣으면 자동으로 채워집니다"></textarea>
+          <div class="kakao-paste-row">
+            <button class="ghost-btn kakao-parse-btn" id="kakaoParseBtn">파싱</button>
+            <div class="kakao-status" id="kakaoStatus"></div>
+          </div>
+        </div>
+        <div class="kakao-divider"><span>또는 직접 입력</span></div>
+        <div class="config-row">
+          <label>날짜</label>
+          <input type="date" id="tradeDate">
+        </div>
+        <div class="config-row">
+          <label>구분</label>
+          <select id="tradeType">
+            <option value="BUY">매수</option>
+            <option value="SELL">매도</option>
+          </select>
+        </div>
+        <div class="config-row">
+          <label>가격 (USD)</label>
+          <input type="number" step="0.01" id="tradePrice">
+        </div>
+        <div class="config-row">
+          <label>수량 (주)</label>
+          <input type="number" id="tradeQty">
+        </div>
+        <div class="config-row">
+          <label>메모</label>
+          <input type="text" id="tradeMemo" placeholder="(선택)">
+        </div>
+        <button class="primary-btn" id="tradeSave">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/db.js"></script>
+  <script src="js/strategies.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(console.error);
+      });
+    }
+  </script>
+</body>
+</html>
