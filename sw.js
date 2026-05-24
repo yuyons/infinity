@@ -1,5 +1,5 @@
 // sw.js - service worker for offline support
-const CACHE_NAME = 'infinity-v0.9.0';
+const CACHE_NAME = 'infinity-v0.10.0';
 const ASSETS = [
   './',
   './index.html',

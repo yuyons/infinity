@@ -179,17 +179,37 @@ const App = (() => {
     });
     $('#vrSave').addEventListener('click', async () => {
       const cfg = {
-        V0: +$('#vrV0').value || 0,
-        startDate: $('#vrStartDate').value || '',
-        monthly: +$('#vrMonthly').value || 0,
-        G: +$('#vrG').value || 10,
-        qty: +$('#vrQty').value || 0,
+        mode: $('#vrMode').value || 'ACCUMULATE',
+        V: +$('#vrV').value || 0,
         pool: +$('#vrPool').value || 0,
-        upper: +$('#vrUpper').value || 120,
-        lower: +$('#vrLower').value || 80,
+        G: +$('#vrG').value || 10,
+        bandPct: +$('#vrBandPct').value || 15,
+        contribAmt: +$('#vrContribAmt').value || 0,
+        qty: +$('#vrQty').value || 0,
+        startDate: $('#vrStartDate').value || '',
+        cycleDays: +$('#vrCycleDays').value || 14,
       };
       await DB.setConfig(currentTicker, 'vr', cfg);
       toast('VR 저장됨');
+      await refreshAll();
+    });
+
+    $('#vrRefreshCycle').addEventListener('click', async () => {
+      const cfg = await DB.getConfig(currentTicker, 'vr');
+      if (!cfg || !cfg.V) { toast('먼저 V값을 입력하고 저장하세요'); return; }
+      if (!confirm(`현재 V=$${cfg.V} → 다음 V 계산해서 사이클을 갱신할까요?`)) return;
+      const next = Strategies.refreshVRCycle({
+        V: cfg.V,
+        pool: cfg.pool || 0,
+        G: cfg.G || 10,
+        mode: cfg.mode || 'ACCUMULATE',
+        contribAmt: cfg.contribAmt || 0,
+      });
+      cfg.V = next.V;
+      cfg.startDate = next.startDate;
+      await DB.setConfig(currentTicker, 'vr', cfg);
+      toast(`V 갱신: $${next.V}`);
+      await loadConfigsToUI();
       await refreshAll();
     });
   }
@@ -205,14 +225,15 @@ const App = (() => {
     $('#m20PerRound').value = m20.perRoundBaseAmt || '';
 
     const vr = await DB.getConfig(currentTicker, 'vr') || {};
-    $('#vrV0').value = vr.V0 || '';
-    $('#vrStartDate').value = vr.startDate || '';
-    $('#vrMonthly').value = vr.monthly || '';
-    $('#vrG').value = vr.G || '';
-    $('#vrQty').value = vr.qty || '';
+    $('#vrMode').value = vr.mode || 'ACCUMULATE';
+    $('#vrV').value = vr.V || '';
     $('#vrPool').value = vr.pool || '';
-    $('#vrUpper').value = vr.upper || 120;
-    $('#vrLower').value = vr.lower || 80;
+    $('#vrG').value = vr.G || 10;
+    $('#vrBandPct').value = vr.bandPct || 15;
+    $('#vrContribAmt').value = vr.contribAmt || '';
+    $('#vrQty').value = vr.qty || '';
+    $('#vrStartDate').value = vr.startDate || '';
+    $('#vrCycleDays').value = vr.cycleDays || 14;
 
     const price = await getTodayPrice();
     $('#todayPrice').value = price || '';
@@ -307,51 +328,69 @@ const App = (() => {
     `;
   }
 
-  // ===== VR 결과 (그대로) =====
+  // ===== VR 결과 =====
   function renderResultVR(result) {
     const box = $('#vrResult');
     if (!result) {
-      box.innerHTML = `<h3>VR 현황</h3><div class="result-empty">파라미터와 종가를 입력하면 V·평가금·신호가 계산됩니다</div>`;
+      box.innerHTML = `<h3>VR 현황</h3><div class="result-empty">V·Pool·G·종가를 입력하면 계산됩니다</div>`;
       return;
     }
     const sig = result.signal;
     const cls = sig === 'BUY' ? 'buy' : sig === 'SELL' ? 'sell' : 'hold';
-    const lbl = sig === 'BUY' ? '매수' : sig === 'SELL' ? '매도' : '관망';
+    const modeLabel = result.mode === 'ACCUMULATE' ? '적립식' : result.mode === 'WITHDRAW' ? '인출식' : '거치식';
+
+    const refreshBadge = result.needsRefresh
+      ? `<div class="signal-item sell" style="margin-bottom:10px;"><div><div class="strategy">사이클 갱신 필요</div><div class="label">${result.daysInCycle}일 경과 (사이클 ${result.cycleDays}일). "사이클 V값 즉시 갱신" 버튼을 눌러주세요.</div></div></div>`
+      : '';
+
     box.innerHTML = `
-      <h3>VR 현황</h3>
+      <h3>VR ${modeLabel} · G=${result.G} · 플마${result.bandPct}%</h3>
+      ${refreshBadge}
       <div class="result-grid">
         <div class="result-item full">
           <div class="k">신호 / ${result.note}</div>
-          <div class="v ${cls}">${lbl}</div>
+          <div class="v ${cls}">${result.action}</div>
         </div>
         <div class="result-item">
-          <div class="k">V (목표값)</div>
+          <div class="k">현재 V</div>
           <div class="v">$${fmt(result.V)}</div>
         </div>
         <div class="result-item">
-          <div class="k">E (평가금)</div>
+          <div class="k">평가금 E</div>
           <div class="v">$${fmt(result.E)}</div>
         </div>
         <div class="result-item">
-          <div class="k">상단선</div>
+          <div class="k">상단 (V × ${(1+result.bandPct/100).toFixed(2)})</div>
           <div class="v">$${fmt(result.upperLine)}</div>
         </div>
         <div class="result-item">
-          <div class="k">하단선</div>
+          <div class="k">하단 (V × ${(1-result.bandPct/100).toFixed(2)})</div>
           <div class="v">$${fmt(result.lowerLine)}</div>
         </div>
         <div class="result-item">
-          <div class="k">총자산</div>
+          <div class="k">Pool (현금)</div>
+          <div class="v">$${fmt(result.pool)}</div>
+        </div>
+        <div class="result-item">
+          <div class="k">보유수량</div>
+          <div class="v">${fmtInt(result.qty)} 주</div>
+        </div>
+        <div class="result-item">
+          <div class="k">총자산 (E+Pool)</div>
           <div class="v">$${fmt(result.totalEquity)}</div>
         </div>
         <div class="result-item">
-          <div class="k">경과일</div>
-          <div class="v">${result.daysElapsed} 일</div>
+          <div class="k">사이클 진행</div>
+          <div class="v">${result.daysInCycle}/${result.cycleDays}일</div>
+        </div>
+        <div class="result-item">
+          <div class="k">다음 V (예정)</div>
+          <div class="v">$${fmt(result.nextV)}</div>
         </div>
         ${result.signal !== 'HOLD' ? `
         <div class="result-item full">
-          <div class="k">권장 ${lbl} 수량</div>
-          <div class="v ${cls}">${fmtInt(result.shares)} 주 (~$${fmt(result.amount)})</div>
+          <div class="k">권장 ${result.action} 수량 (@$${fmt(result.buyPrice || result.sellPrice)})</div>
+          <div class="v ${cls}">${fmtInt(result.targetShares)} 주 (~$${fmt(result.targetAmount)})</div>
         </div>` : ''}
       </div>
     `;
@@ -744,7 +783,20 @@ const App = (() => {
         mode: m20.mode || 'NORMAL',
       });
     }
-    if (vr && price) rVR = Strategies.calcVR({ ...vr, todayPrice: price });
+    if (vr && vr.V && price) {
+      rVR = Strategies.calcVR({
+        V: vr.V,
+        pool: vr.pool || 0,
+        G: vr.G || 10,
+        bandPct: vr.bandPct || 15,
+        mode: vr.mode || 'ACCUMULATE',
+        contribAmt: vr.contribAmt || 0,
+        qty: vr.qty || 0,
+        todayPrice: price,
+        startDate: vr.startDate,
+        cycleDays: vr.cycleDays || 14,
+      });
+    }
 
     renderInfinityResult('m40Result', r40, '40무매 V2.2');
     renderInfinityResult('m20Result', r20, '20무매 V3.0');

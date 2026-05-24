@@ -337,68 +337,194 @@ const Strategies = (() => {
     };
   }
 
-  // ===== VR (Value Rebalancing) — 기존 그대로 =====
+  // ===== VR (Value Rebalancing) - 정식 공식 =====
+  //
+  // 공식:
+  //   V₂ = V₁ + Pool/G ± (적립금 or 인출금)
+  //   (V₂는 2주마다 갱신)
+  //
+  // 밴드:
+  //   최대 = V × (1 + bandPct/100)
+  //   최소 = V × (1 - bandPct/100)
+  //
+  // 모드:
+  //   ACCUMULATE: 사이클마다 +contribAmt
+  //   HOLD: ±0
+  //   WITHDRAW: 사이클마다 -contribAmt
+  //
+  // 입력:
+  //   V: 현재 사이클의 V값
+  //   pool: 현재 현금
+  //   G: 기울기 분모
+  //   bandPct: 밴드 폭 %
+  //   mode: 'ACCUMULATE' | 'HOLD' | 'WITHDRAW'
+  //   contribAmt: 사이클당 적립/인출 금액
+  //   qty: 현재 보유 수량
+  //   todayPrice: 오늘 종가
+  //   startDate: 현재 사이클 시작일
+  //   cycleDays: 2주 = 14 (사이클 주기)
+  //   asOfDate: 평가 기준일 (기본 오늘)
   function calcVR(opts) {
     const {
-      V0,
-      startDate,
-      monthly = 0,
-      G = 10,
-      qty = 0,
+      V,
       pool = 0,
+      G = 10,
+      bandPct = 15,
+      mode = 'ACCUMULATE',
+      contribAmt = 0,
+      qty = 0,
       todayPrice,
-      upper = 120,
-      lower = 80,
+      startDate,  // 현재 사이클 시작일
+      cycleDays = 14,
       asOfDate,
     } = opts;
 
-    if (!V0 || !startDate || !todayPrice) return null;
+    if (!V || !todayPrice) return null;
 
-    const start = new Date(startDate);
-    const today = asOfDate ? new Date(asOfDate) : new Date();
-    const dayDiff = Math.max(0, Math.floor((today - start) / 86400000));
-    const monthsElapsed = Math.floor(dayDiff / 30);
-    const accumulated = monthly * monthsElapsed;
-    const ratePerDay = (0.01 / G) / 30;
-    const V = (V0 + accumulated) * (1 + ratePerDay * dayDiff);
+    // 다음 사이클의 V값 계산 (= 2주 뒤에 적용될 V)
+    let contribSign = 0;
+    if (mode === 'ACCUMULATE') contribSign = 1;
+    else if (mode === 'WITHDRAW') contribSign = -1;
+    const nextV = V + pool / G + contribSign * contribAmt;
 
+    // 사이클 진행 일수
+    let daysInCycle = 0;
+    let cycleProgress = 0;
+    if (startDate) {
+      const start = new Date(startDate);
+      const today = asOfDate ? new Date(asOfDate) : new Date();
+      daysInCycle = Math.max(0, Math.floor((today - start) / 86400000));
+      cycleProgress = Math.min(100, (daysInCycle / cycleDays) * 100);
+    }
+    const daysUntilNext = Math.max(0, cycleDays - daysInCycle);
+    const needsRefresh = daysInCycle >= cycleDays;
+
+    // 평가금 / 밴드
     const E = qty * todayPrice;
-    const upperLine = V * (upper/100);
-    const lowerLine = V * (lower/100);
+    const upperLine = V * (1 + bandPct/100);
+    const lowerLine = V * (1 - bandPct/100);
 
+    // 신호 판정
     let signal = 'HOLD';
-    let amount = 0;
-    let shares = 0;
-    let note = '밴드 내 (유지)';
+    let action = '관망';
+    let note = `밴드 내 (${V * (1 - bandPct/100) | 0} ~ ${V * (1 + bandPct/100) | 0})`;
+    let targetShares = 0;
+    let targetAmount = 0;
+    let buyPrice = 0;
+    let sellPrice = 0;
 
-    if (E > upperLine) {
-      signal = 'SELL';
-      amount = E - V;
-      shares = -floor(amount / todayPrice);
-      note = `상단 돌파 → V값까지 매도`;
-    } else if (E < lowerLine) {
+    if (E < lowerLine) {
+      // 매수: 평가금을 V까지 끌어올림
       signal = 'BUY';
-      amount = V - E;
-      const want = floor(amount / todayPrice);
+      targetAmount = V - E;
+      const want = floor(targetAmount / todayPrice);
       const maxBuyable = floor(pool / todayPrice);
-      shares = Math.min(want, maxBuyable);
-      if (shares < want) note = `하단 돌파 → 예수금 한도 내 매수 (${shares}/${want})`;
-      else note = `하단 돌파 → V값까지 매수`;
+      targetShares = Math.min(want, maxBuyable);
+      buyPrice = todayPrice;
+      if (targetShares < want) {
+        action = `매수 (Pool 한도)`;
+        note = `하단 돌파 → ${targetShares}주 매수 (희망 ${want}주, Pool 부족)`;
+      } else {
+        action = '매수';
+        note = `하단 돌파 → V값까지 ${targetShares}주 매수`;
+      }
+    } else if (E > upperLine) {
+      // 매도: 평가금을 V까지 끌어내림
+      signal = 'SELL';
+      targetAmount = E - V;
+      targetShares = floor(targetAmount / todayPrice);
+      sellPrice = todayPrice;
+      action = '매도';
+      note = `상단 돌파 → V값까지 ${targetShares}주 매도`;
+    }
+
+    // 매수표 생성 (현재가에서 가격이 더 내려가면 단계별 매수)
+    // 평가금이 lowerLine 아래로 더 떨어질 때마다 1주씩 추가 매수해서 V에 맞추는 사다리
+    const buyLadder = [];
+    if (qty > 0) {
+      // 보유 1주씩 증가시키면서 그에 맞는 가격·풀 계산
+      // 단순화: 현재 qty에서 +10주까지 단계별 가격 표시
+      let simPool = pool;
+      let simQty = qty;
+      for (let i = 1; i <= 10; i++) {
+        // simQty주 보유 시, 평가금이 lowerLine이 되는 가격
+        const triggerPrice = lowerLine / (simQty + i);
+        if (triggerPrice <= 0) break;
+        const cost = triggerPrice * 1;  // 1주씩
+        if (simPool < cost) break;
+        simPool -= cost;
+        buyLadder.push({
+          step: i,
+          qtyAfter: simQty + i,
+          buyPrice: round(triggerPrice, 2),
+          poolAfter: round2(simPool),
+        });
+      }
+    }
+
+    // 매도표 생성 (상승 시 매도 사다리)
+    const sellLadder = [];
+    if (qty > 0) {
+      let simPool = pool;
+      let simQty = qty;
+      for (let i = 1; i <= 10; i++) {
+        if (simQty - i + 1 <= 0) break;
+        // simQty주 보유 시, 평가금이 upperLine이 되는 가격
+        const triggerPrice = upperLine / (simQty - i + 1);
+        if (triggerPrice <= 0) break;
+        simPool += triggerPrice;
+        simQty -= 0;  // 표시상 누적
+        sellLadder.push({
+          step: i,
+          qtyAfter: qty - i,
+          sellPrice: round(triggerPrice, 2),
+          poolAfter: round2(simPool),
+        });
+      }
     }
 
     return {
-      signal, note,
+      signal,
+      action,
+      note,
       V: round(V),
+      nextV: round(nextV),
       E: round(E),
       upperLine: round(upperLine),
       lowerLine: round(lowerLine),
-      amount: round(Math.abs(amount)),
-      shares: Math.abs(shares),
-      direction: shares > 0 ? 'BUY' : shares < 0 ? 'SELL' : 'HOLD',
-      daysElapsed: dayDiff,
-      monthsElapsed,
-      accumulated: round(accumulated),
+      bandPct,
+      G,
+      mode,
+      pool: round2(pool),
+      qty,
+      targetShares: Math.abs(targetShares),
+      targetAmount: round(Math.abs(targetAmount)),
+      buyPrice: round(buyPrice, 2),
+      sellPrice: round(sellPrice, 2),
+      daysInCycle,
+      daysUntilNext,
+      cycleProgress: round(cycleProgress, 1),
+      cycleDays,
+      needsRefresh,
+      contribAmt,
       totalEquity: round(E + pool),
+      buyLadder,
+      sellLadder,
+    };
+  }
+
+  // ===== VR 사이클 V값 갱신 =====
+  // 현재 V·Pool·모드 입력 → 다음 사이클 V값과 시작일 반환
+  function refreshVRCycle(opts) {
+    const { V, pool = 0, G = 10, mode = 'ACCUMULATE', contribAmt = 0, today } = opts;
+    let contribSign = 0;
+    if (mode === 'ACCUMULATE') contribSign = 1;
+    else if (mode === 'WITHDRAW') contribSign = -1;
+    const nextV = V + pool / G + contribSign * contribAmt;
+    const newStartDate = (today || new Date()).toISOString().slice(0, 10);
+    return {
+      V: round(nextV, 2),
+      startDate: newStartDate,
     };
   }
 
@@ -410,5 +536,6 @@ const Strategies = (() => {
     isFirstHalf,
     isQuarterLossZone,
     calcVR,
+    refreshVRCycle,
   };
 })();
